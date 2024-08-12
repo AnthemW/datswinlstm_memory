@@ -1,5 +1,3 @@
-
-
 import torch
 import torch.nn as nn
 from einops import rearrange
@@ -7,26 +5,29 @@ from timm.models.layers import DropPath, to_2tuple, trunc_normal_
 from MotionSqueeze import MS
 import torch.utils.checkpoint as checkpoint
 from dat_blocks import DATSwinLayer, DATSwinTransformerBlock
+from torchsummary import summary
+from fvcore.nn import FlopCountAnalysis, parameter_count_table
+
 
 ### 基于3D卷积
 class MotionEncoder3D(nn.Module):
     def __init__(self):
-        super(MotionEncoder3D,self).__init__()
+        super(MotionEncoder3D ,self).__init__()
         self.conv3d_1 = nn.Sequential(
-                                      nn.Conv3d(1,32,kernel_size=(3,7,7),stride=(1,2,2),padding=(1,3,3)),
+            nn.Conv3d(1 ,32 ,kernel_size=(3 ,7 ,7) ,stride=(1 ,2 ,2) ,padding=(1 ,3 ,3)),
+            nn.SiLU())
+        self.conv3d_2 = nn.Sequential(nn.Conv3d(32 ,64 ,kernel_size=(3 ,3 ,3) ,stride=(1 ,2 ,2) ,padding=(0 ,1 ,1)),
                                       nn.SiLU())
-        self.conv3d_2 = nn.Sequential(nn.Conv3d(32,64,kernel_size=(3,3,3),stride=(1,2,2),padding=(0,1,1)),
+        self.conv3d_3 = nn.Sequential(nn.Conv3d(64 ,128 ,kernel_size=(3 ,3 ,3) ,stride=(1 ,2 ,2) ,padding=(1 ,1 ,1)),
                                       nn.SiLU())
-        self.conv3d_3 = nn.Sequential(nn.Conv3d(64,128,kernel_size=(3,3,3),stride=(1,2,2),padding=(1,1,1)),
-                                      nn.SiLU())
-        self.conv3d_4 = nn.Sequential(nn.Conv3d(128,512,kernel_size=(3,3,3),stride=(1,2,2),padding=(0,1,1)),
+        self.conv3d_4 = nn.Sequential(nn.Conv3d(128 ,512 ,kernel_size=(3 ,3 ,3) ,stride=(1 ,2 ,2) ,padding=(0 ,1 ,1)),
                                       nn.SiLU())
         # self.linear = nn.Sequential(nn.Linear(256,240),
         #                             nn.SiLU() )## 240, memory_size)
-        self.avg_pool = nn.AdaptiveAvgPool3d([1,6,6])
-    
-    def forward(self,x):
-        x = x.permute(0,2,1,3,4)
+        self.avg_pool = nn.AdaptiveAvgPool3d([1 ,6 ,6])
+
+    def forward(self ,x):
+        x = x.permute(0 ,2 ,1 ,3 ,4)
         x = self.conv3d_1(x)
         x = self.conv3d_2(x)
         x = self.conv3d_3(x)
@@ -35,55 +36,54 @@ class MotionEncoder3D(nn.Module):
         # x = self.linear(x)
         return x.squeeze(2)
 
+    # class MotionEncoder2D(nn.Module):
+    #    def __init__(self, in_len=12, out_c=400):
+    #        super(MotionEncoder2D, self).__init__()
+    #        self.conv2d_1 = nn.Sequential(
+    #            nn.Conv2d(1, 32, kernel_size=(7, 7), stride=(2, 2), padding=(3, 3)),
+    #            nn.SiLU())
+    #        self.conv2d_2 = nn.Sequential(nn.Conv2d(32, 64, kernel_size=(3, 3), stride=(2, 2), padding=(1, 1)),
+    #                                     nn.SiLU())
+    #        self.conv2d_3 = nn.Sequential(nn.Conv2d(64, 128, kernel_size=(3, 3), stride=(2, 2), padding=(1, 1)),
+    #                                      nn.SiLU())
+    #        self.conv2d_4 = nn.Sequential(nn.Conv2d(128, 256, kernel_size=(3, 3), stride=(2, 2), padding=(1, 1)),
+    #                                      nn.SiLU())
+    #        self.conv2d_5 = nn.Sequential(nn.Conv2d(256, out_c, kernel_size=(3, 3), stride=(2, 2), padding=(1, 1)),
+    #                                      nn.SiLU())
+    #        self.conv3d_1 = nn.Sequential(
+    #            nn.Conv3d(out_c, out_c, kernel_size=(3, 3, 3), stride=(2, 2, 2), padding=(0, 1, 1)),
+    #            nn.SiLU())
+    #        self.conv3d_2 = nn.Sequential(
+    #            nn.Conv3d(out_c, out_c, kernel_size=(3, 3, 3), stride=(2, 1, 1), padding=(0, 1, 1)),
+    #            nn.SiLU())
+    #        self.avg_pool_3d = nn.AdaptiveAvgPool3d([1, None, None])
 
-#class MotionEncoder2D(nn.Module):
-#    def __init__(self, in_len=12, out_c=400):
-#        super(MotionEncoder2D, self).__init__()
-#        self.conv2d_1 = nn.Sequential(
-#            nn.Conv2d(1, 32, kernel_size=(7, 7), stride=(2, 2), padding=(3, 3)),
-#            nn.SiLU())
-#        self.conv2d_2 = nn.Sequential(nn.Conv2d(32, 64, kernel_size=(3, 3), stride=(2, 2), padding=(1, 1)),
- #                                     nn.SiLU())
-#        self.conv2d_3 = nn.Sequential(nn.Conv2d(64, 128, kernel_size=(3, 3), stride=(2, 2), padding=(1, 1)),
-#                                      nn.SiLU())
-#        self.conv2d_4 = nn.Sequential(nn.Conv2d(128, 256, kernel_size=(3, 3), stride=(2, 2), padding=(1, 1)),
-#                                      nn.SiLU())
-#        self.conv2d_5 = nn.Sequential(nn.Conv2d(256, out_c, kernel_size=(3, 3), stride=(2, 2), padding=(1, 1)),
-#                                      nn.SiLU())
-#        self.conv3d_1 = nn.Sequential(
-#            nn.Conv3d(out_c, out_c, kernel_size=(3, 3, 3), stride=(2, 2, 2), padding=(0, 1, 1)),
-#            nn.SiLU())
-#        self.conv3d_2 = nn.Sequential(
-#            nn.Conv3d(out_c, out_c, kernel_size=(3, 3, 3), stride=(2, 1, 1), padding=(0, 1, 1)),
-#            nn.SiLU())
-#        self.avg_pool_3d = nn.AdaptiveAvgPool3d([1, None, None])
-
-    def forward(self, x):
-        print(f"MotionEncoder2D Input: {x.shape}")
-        b, t, c, h, w = x.shape
-        x = x.contiguous().view(-1, c, h, w)  # b*t, c, h, w
-        x = self.conv2d_1(x)
-        print(f"After conv2d_1: {x.shape}")
-        x = self.conv2d_2(x)
-        print(f"After conv2d_2: {x.shape}")
-        x = self.conv2d_3(x)
-        print(f"After conv2d_3: {x.shape}")
-        x = self.conv2d_4(x)
-        print(f"After conv2d_4: {x.shape}")
-        x = self.conv2d_5(x)
-        print(f"After conv2d_5: {x.shape}")
-        x = x.contiguous().view(b, -1, t, h // 32, w // 32)
-        print(f"After view: {x.shape}")
-        motion_features = x[:, :, 1:, :, :] - x[:, :, :-1, :, :]
-        zero_frame = torch.zeros_like(x[:, :, :1, :, :])
-        motion_features = torch.cat([zero_frame, motion_features], dim=2)
-        x = self.conv3d_1(motion_features)
-        print(f"After conv3d_1: {x.shape}")
-        x = self.conv3d_2(x)
-        print(f"After conv3d_2: {x.shape}")
-        x = self.avg_pool_3d(x)
-        print(f"After avg_pool_3d: {x.shape}")
-        return x.squeeze(2)
+    # def forward(self, x):
+    #     # print(f"MotionEncoder2D Input: {x.shape}")
+    #     b, t, c, h, w = x.shape
+    #     x = x.contiguous().view(-1, c, h, w)  # b*t, c, h, w
+    #     x = self.conv2d_1(x)
+    #     # print(f"After conv2d_1: {x.shape}")
+    #     x = self.conv2d_2(x)
+    #     # print(f"After conv2d_2: {x.shape}")
+    #     x = self.conv2d_3(x)
+    #     # print(f"After conv2d_3: {x.shape}")
+    #     x = self.conv2d_4(x)
+    #     # print(f"After conv2d_4: {x.shape}")
+    #     x = self.conv2d_5(x)
+    #     # print(f"After conv2d_5: {x.shape}")
+    #     x = x.contiguous().view(b, -1, t, h // 32, w // 32)
+    #     # print(f"After view: {x.shape}")
+    #     motion_features = x[:, :, 1:, :, :] - x[:, :, :-1, :, :]
+    #     zero_frame = torch.zeros_like(x[:, :, :1, :, :])
+    #     motion_features = torch.cat([zero_frame, motion_features], dim=2)
+    #     x = self.conv3d_1(motion_features)
+    #     # print(f"After conv3d_1: {x.shape}")
+    #     x = self.conv3d_2(x)
+    #     # print(f"After conv3d_2: {x.shape}")
+    #     x = self.avg_pool_3d(x)
+    #     # print(f"After avg_pool_3d: {x.shape}")
+    #     return x.squeeze(2)
 
 
 class FeedForward(nn.Module):
@@ -167,15 +167,15 @@ class Transformer(nn.Module):
 
 
 class Memory(nn.Module):
-    def __init__(self, args, memory_channel_size=256, memory_slot_size=100, short_len=12, long_len=24):
+    def __init__(self, args, memory_channel_size=256, memory_slot_size=100, short_len=24, long_len=37):
         super(Memory, self).__init__()
         self.args = args
         self.memory_size = memory_channel_size
         self.memory_slot_size = memory_slot_size
         self.short_len = short_len
         self.long_len = long_len
-        #self.motion_encoder_2d = MotionEncoder2D(in_len=self.short_len, out_c=self.memory_size)
-        #self.motion_context_encoder_2d = MotionEncoder2D(in_len=self.long_len, out_c=self.memory_size)
+        # self.motion_encoder_2d = MotionEncoder2D(in_len=self.short_len, out_c=self.memory_size)
+        # self.motion_context_encoder_2d = MotionEncoder2D(in_len=self.long_len, out_c=self.memory_size)
         ## 使用新的motion_encoder
         self.motion_encoder_2d = MotionEncoder3D()
         self.motion_context_encoder_2d = MotionEncoder3D()
@@ -185,7 +185,8 @@ class Memory(nn.Module):
         self.embedder = nn.Sequential(
             PatchExpanding(input_resolution=[6, 6], dim=512, dim_scale=2),
             PatchExpanding(input_resolution=[12, 12], dim=256, dim_scale=2),
-            # nn.Linear(128, 128),
+            PatchExpanding(input_resolution=[24, 24], dim=128, dim_scale=2),
+            nn.Linear(64, 256),
         )
 
         self.attention_block = Transformer(dim=self.memory_size, depth=1, heads=8, dim_head=64,
@@ -199,35 +200,35 @@ class Memory(nn.Module):
         self.memory_shape = [self.memory_slot_size, self.memory_size]
         self.memory_bank = nn.init.uniform_(torch.empty(self.memory_shape), a=0.0, b=1.0)
         self.memory_bank = nn.Parameter(self.memory_bank, requires_grad=True)
-        self.attention_size = 128
+        self.attention_size = 256
         self.attention_func = nn.Sequential(
-            nn.Linear(256, 16),
+            nn.Linear(512, 16),
             nn.ReLU(inplace=True),
             nn.Linear(16, self.attention_size),
             nn.Sigmoid())
-        self.fuse = nn.Linear(256, 128)
+        self.fuse = nn.Linear(512, 256)
 
     def forward(self, inputs, memory_x, phase):
-        print(f"Memory Input: inputs {inputs.shape}, memory_x {memory_x.shape}, phase {phase}")
+        # print(f"Memory Input: inputs {inputs.shape}, memory_x {memory_x.shape}, phase {phase}")
         ## 用帧差作为运动信息
-        memory_x = memory_x[:,1:,...] - memory_x[:,:-1,...] # B,T,C,H,W
-
+        memory_x = memory_x[: ,1: ,...] - memory_x[: ,:-1 ,...] # B,T,C,H,W
+        # print(memory_x.shape)
         b, t, c, h, w = memory_x.shape
         memory_query = self.motion_context_encoder_2d(memory_x) if phase == 1 else self.motion_encoder_2d(memory_x)
-        print(f"After motion_encoder: {memory_query.shape}")
+        # print(f"After motion_encoder: {memory_query.shape}")
 
         b_, c_, h_, w_ = memory_query.shape
         memory_query = memory_query.contiguous().permute(0, 2, 3, 1).view(b_, -1, c_)
-        print(f"After permute and view: {memory_query.shape}")
+        # print(f"After permute and view: {memory_query.shape}")
 
         b__, l, c__ = memory_query.shape
         memory_bank = self.memory_bank.unsqueeze(0).repeat(b_, 1, 1).contiguous()
         memory_query += self.pos_embedding
         matched_memory = self.attention_block(memory_query, memory_bank, memory_bank)
-        print(f"After attention_block: {matched_memory.shape}")
+        # print(f"After attention_block: {matched_memory.shape}")
 
         matched_memory = self.embedder(matched_memory)
-        print(f"After embedder: {matched_memory.shape}")
+        # print(f"After embedder: {matched_memory.shape}")
 
         outputs = []
         inputs_len = inputs.shape[1]
@@ -238,13 +239,13 @@ class Memory(nn.Module):
 
         for i in range(inputs_len - 1):
             output, states_down, states_up = self.predictor(inputs[:, i], states_down, states_up)
-            print(f"Predictor output at step {i}: {output.shape}")
+            # print(f"Predictor output at step {i}: {output.shape}")
             outputs.append(output)
-        print(f"states_down shape: {states_down[-1][1].shape}")
-        print(f"matched_memory shape: {matched_memory.shape}")
+        # print(f"states_down shape: {states_down[-1][1].shape}")
+        # print(f"matched_memory shape: {matched_memory.shape}")
         for i in range(self.target_len):
             output, states_down, states_up = self.predictor(last_input, states_down, states_up)
-            print(f"Predictor output at target step {i}: {output.shape}")
+            # print(f"Predictor output at target step {i}: {output.shape}")
             outputs.append(output)
             last_input = output
             attention = self.attention_func(torch.cat([states_down[-1][1], matched_memory], dim=2))
@@ -255,7 +256,7 @@ class Memory(nn.Module):
         return torch.stack(outputs, dim=1)
 
     def set_memory_bank_requires_grad(self, requires_grad):
-        self.memory_bank.requires_grad = requires_grad
+        self.memory_bank.requires_grad=requires_grad
 
 
 class Mlp(nn.Module):
@@ -403,7 +404,7 @@ class SwinTransformerBlock(nn.Module):
         self.register_buffer("attn_mask", attn_mask)
 
     def forward(self, x, hx=None):
-        print(f"SwinTransformerBlock Input: {x.shape}, hx: {hx.shape if hx is not None else None}")
+        # print(f"SwinTransformerBlock Input: {x.shape}, hx: {hx.shape if hx is not None else None}")
         H, W = self.input_resolution
         B, L, C = x.shape
         assert L == H * W, "input feature has wrong size"
@@ -437,7 +438,7 @@ class SwinTransformerBlock(nn.Module):
         x = shortcut + self.drop_path(x)
         x = x + self.drop_path(self.mlp(self.norm2(x)))
 
-        print(f"SwinTransformerBlock Output: {x.shape}")
+        # print(f"SwinTransformerBlock Output: {x.shape}")
         return x
 
 
@@ -704,13 +705,13 @@ class DownSample(nn.Module):
 
     def forward(self, x, y):
         x = self.patch_embed(x)
-        print(f"DownSample patch_embed: {x.shape}")
+        # print(f"DownSample patch_embed: {x.shape}")
         hidden_states_down = []
         for index, layer in enumerate(self.layers):
             x, hidden_state = layer(x, y[index])
             x = self.downsample[index](x)
             hidden_states_down.append(hidden_state)
-            print(f"DownSample layer {index} output: {x.shape}, hidden_state: {hidden_state[0].shape}")
+            # print(f"DownSample layer {index} output: {x.shape}, hidden_state: {hidden_state[0].shape}")
         return hidden_states_down, x
 
 
@@ -748,9 +749,9 @@ class UpSample(nn.Module):
             self.upsample.append(upsample)
 
         # 调整最终的上采样层，以确保输出尺寸为384x384
-        # 必须用sigmoid吗？可以先这样，效果不好再改
         self.final_upsample = nn.Sequential(
-            nn.ConvTranspose2d(in_channels=64, out_channels=in_chans, kernel_size=4, stride=2, padding=1),
+            nn.ConvTranspose2d(in_channels=64, out_channels=in_chans, kernel_size=1, stride=1, padding=0),  # 原来的是 64
+
             nn.Sigmoid()
         )
 
@@ -760,15 +761,18 @@ class UpSample(nn.Module):
             x, hidden_state = layer(x, y[index])
             x = self.upsample[index](x)
             hidden_states_up.append(hidden_state)
-            print(f"UpSample layer {index} output: {x.shape}, hidden_state: {hidden_state[0].shape}")
+            # print(f"UpSample layer {index} output: {x.shape}, hidden_state: {hidden_state[0].shape}")
 
         x = torch.sigmoid(self.Unembed(x))
-        print(f"UpSample Unembed output: {x.shape}")
+        # print(f"UpSample Unembed output: {x.shape}")
         # 通过新的上采样层将输出恢复到384x384
         B, C, H, W = x.shape  # 调整形状为B, C, H, W
         x = self.final_upsample(x)  # 恢复到384x384
-        print(f"UpSample final_upsample output: {x.shape}")
+        # print(f"UpSample final_upsample output: {x.shape}")
         return hidden_states_up, x
+
+
+
 
 
 class SwinLSTM(nn.Module):
@@ -788,10 +792,47 @@ class SwinLSTM(nn.Module):
         return output, states_down, states_up
 
 
+
+
+
 if __name__ == '__main__':
     import os
     import argparse
     import torch
+
+    # os.environ['MASTER_ADDR'] = 'localhost'
+    # os.environ['MASTER_PORT'] = '5678'
+
+    # device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+
+    # parser = argparse.ArgumentParser('SwinLSTM testing script', add_help=False)
+    # parser.add_argument('--input_img_size', default=384, type=int, help='Input image size')
+    # parser.add_argument('--patch_size', default=4, type=int, help='Patch size of input images')  # 修改patch_size为8
+    # parser.add_argument('--input_channels', default=1, type=int, help='Number of input image channels')
+    # parser.add_argument('--embed_dim', default=128, type=int,
+    #                     help='Patch embedding dimension')  # 根据新的patch_size调整embed_dim
+    # parser.add_argument('--depths_down', default=[4,4], type=int, help='Downsample of SwinLSTM-D')
+    # parser.add_argument('--depths_up', default=[4,4], type=int, help='Upsample of SwinLSTM-D')
+    # parser.add_argument('--heads_number', default=[4, 8], type=int,
+    #                     help='Number of attention heads in different layers')
+    # parser.add_argument('--window_size', default=4, type=int, help='Window size of Swin Transformer layer')
+    # parser.add_argument('--short_len', default=12, type=int, help='Short length for memory encoder')
+    # parser.add_argument('--long_len', default=36, type=int, help='Long length for memory context encoder')
+    # parser.add_argument('--out_len', default=24, type=int, help='Output sequence length')
+
+    # args = parser.parse_args()
+
+    # model = Memory(args, memory_channel_size=512, short_len=args.short_len, long_len=args.long_len).to(device)
+    # # print('\nModel is loaded!')
+
+    # input_tensor = torch.randn(1, 12, 1, 384, 384).to(device)
+    # memory_x = torch.randn(1, 24, 1, 384, 384).to(device)
+    # phase = 2
+
+    # with torch.no_grad():
+    #     output = model(input_tensor, memory_x, phase)
+
+    # print('Output shape:', output.shape)
 
     os.environ['MASTER_ADDR'] = 'localhost'
     os.environ['MASTER_PORT'] = '5678'
@@ -799,30 +840,49 @@ if __name__ == '__main__':
     device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 
     parser = argparse.ArgumentParser('SwinLSTM testing script', add_help=False)
-    parser.add_argument('--input_img_size', default=384, type=int, help='Input image size')
-    parser.add_argument('--patch_size', default=8, type=int, help='Patch size of input images')  # 修改patch_size为8
+    parser.add_argument('--input_img_size', default=768, type=int, help='Input image size')
+    parser.add_argument('--patch_size', default=4, type=int, help='Patch size of input images')
     parser.add_argument('--input_channels', default=1, type=int, help='Number of input image channels')
-    parser.add_argument('--embed_dim', default=64, type=int,
-                        help='Patch embedding dimension')  # 根据新的patch_size调整embed_dim
-    parser.add_argument('--depths_down', default=[3, 2], type=int, help='Downsample of SwinLSTM-D')
-    parser.add_argument('--depths_up', default=[2, 3], type=int, help='Upsample of SwinLSTM-D')
-    parser.add_argument('--heads_number', default=[4, 8], type=int,
-                        help='Number of attention heads in different layers')
+    parser.add_argument('--embed_dim', default=128, type=int, help='Patch embedding dimension')
+    parser.add_argument('--depths_down', default=[1, 1], type=int, help='Downsample of SwinLSTM-D')
+    parser.add_argument('--depths_up', default=[1, 1], type=int, help='Upsample of SwinLSTM-D')
+    parser.add_argument('--heads_number', default=[4, 8], type=int, help='Number of attention heads in different layers')
     parser.add_argument('--window_size', default=4, type=int, help='Window size of Swin Transformer layer')
-    parser.add_argument('--short_len', default=12, type=int, help='Short length for memory encoder')
-    parser.add_argument('--long_len', default=36, type=int, help='Long length for memory context encoder')
-    parser.add_argument('--out_len', default=24, type=int, help='Output sequence length')
+    parser.add_argument('--short_len', default=13, type=int, help='Short length for memory encoder')
+    parser.add_argument('--long_len', default=25, type=int, help='Long length for memory context encoder')
+    parser.add_argument('--out_len', default=12, type=int, help='Output sequence length')
 
     args = parser.parse_args()
 
     model = Memory(args, memory_channel_size=512, short_len=args.short_len, long_len=args.long_len).to(device)
     print('\nModel is loaded!')
 
-    input_tensor = torch.randn(1, 12, 1, 384, 384).to(device)
-    memory_x = torch.randn(1, 36, 1, 384, 384).to(device)
-    phase = 1
+    input_tensor = torch.randn(1, 13, 1, 768, 768).to(device)
+    memory_x = torch.randn(1, 25, 1, 768, 768).to(device)
+    phase = torch.tensor([2], dtype=torch.int).to(device)
 
-    with torch.no_grad():
-        output = model(input_tensor, memory_x, phase)
+    # Define a wrapper for the model to handle multiple inputs
+    class ModelWrapper(nn.Module):
+        def __init__(self, model):
+            super(ModelWrapper, self).__init__()
+            self.model = model
 
-    print('Output shape:', output.shape)
+        def forward(self, input_tensor, memory_x, phase):
+            return self.model(input_tensor, memory_x, phase.item())
+
+    wrapped_model = ModelWrapper(model).to(device)
+
+    # Calculate the number of parameters
+    print("\nParameter count of the model:")
+    params = parameter_count_table(wrapped_model)
+    print(params)
+
+    # Calculate FLOPs
+    inputs = (input_tensor, memory_x, phase)
+    flops = FlopCountAnalysis(wrapped_model, inputs)
+    print("\nFLOPs of the model:")
+    print(f"Total FLOPs: {flops.total()}")
+
+    # Print model summary manually
+    print("\nModel Summary:")
+    print(wrapped_model)
